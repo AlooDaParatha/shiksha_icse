@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Digital Whiteboard</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      touch-action: none;
+      background: #fff;
+    }
+    canvas {
+      position: absolute;
+      top: 0; left: 0;
+      z-index: 1;
+    }
+    .toolbar {
+      position: absolute;
+      bottom: 0;
+      width: 100%;
+      height: 60px;
+      background: #f0f0f0;
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+      z-index: 5;
+      border-top: 1px solid #ccc;
+    }
+    .tool-btn {
+      font-size: 24px;
+      background: none;
+      border: none;
+    }
+
+    .panel {
+      position: absolute;
+      bottom: 60px;
+      background: #fff;
+      border-radius: 8px;
+      padding: 10px;
+      box-shadow: 0 0 10px #0002;
+      z-index: 6;
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .color-picker {
+      display: flex;
+      gap: 5px;
+    }
+    .color-circle {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      border: 1px solid #ccc;
+      cursor: pointer;
+    }
+
+    .size-slider {
+      width: 100px;
+    }
+
+    .size-preview {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: black;
+      margin-top: 5px;
+    }
+
+    #eraserCircle {
+      position: absolute;
+      pointer-events: none;
+      border-radius: 50%;
+      background: rgba(0,0,0,0.1);
+      border: 1px solid #888;
+      display: none;
+      z-index: 2;
+    }
+
+    .pen-type-selector {
+      display: flex;
+      gap: 5px;
+    }
+
+    .pen-type-selector button {
+      font-size: 12px;
+    }
+
+    .selection-box {
+      position: absolute;
+      border: 2px dashed red;
+      display: none;
+      z-index: 10;
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="canvas"></canvas>
+<div id="eraserCircle"></div>
+
+<!-- Pen Panel -->
+<div class="panel" id="penPanel">
+  <div class="color-picker">
+    <div class="color-circle" style="background:red" data-color="red"></div>
+    <div class="color-circle" style="background:green" data-color="green"></div>
+    <div class="color-circle" style="background:blue" data-color="blue"></div>
+    <div class="color-circle" style="background:black" data-color="black"></div>
+  </div>
+  <input type="range" class="size-slider" id="penSizeSlider" min="1" max="30" value="5">
+  <div class="size-preview" id="penPreview"></div>
+  <div class="pen-type-selector">
+    <button data-pen="fountain">Fountain</button>
+    <button data-pen="pencil">Pencil</button>
+    <button data-pen="highlighter">Highlighter</button>
+  </div>
+</div>
+
+<!-- Eraser Panel -->
+<div class="panel" id="eraserPanel">
+  <input type="range" class="size-slider" id="eraserSizeSlider" min="10" max="100" value="30">
+  <div class="size-preview" id="eraserPreview"></div>
+  <button id="selectionEraserBtn">Selection Eraser</button>
+</div>
+
+<div class="selection-box" id="selectionBox"></div>
+
+<div class="toolbar">
+  <button class="tool-btn" id="penBtn">✏️</button>
+  <button class="tool-btn" id="eraserBtn">🧽</button>
+  <button class="tool-btn" id="undoBtn">↩️</button>
+  <button class="tool-btn" id="redoBtn">↪️</button>
+</div>
+
+<script>
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  let width = canvas.width = window.innerWidth;
+  let height = canvas.height = window.innerHeight;
+
+  let drawing = false;
+  let currentTool = 'pen';
+  let penColor = 'black';
+  let penSize = 5;
+  let eraserSize = 30;
+  let penType = 'fountain';
+  let points = [];
+  let history = [];
+  let redoStack = [];
+
+  const penPanel = document.getElementById('penPanel');
+  const eraserPanel = document.getElementById('eraserPanel');
+  const penBtn = document.getElementById('penBtn');
+  const eraserBtn = document.getElementById('eraserBtn');
+  const undoBtn = document.getElementById('undoBtn');
+  const redoBtn = document.getElementById('redoBtn');
+  const penSizeSlider = document.getElementById('penSizeSlider');
+  const penPreview = document.getElementById('penPreview');
+  const eraserSizeSlider = document.getElementById('eraserSizeSlider');
+  const eraserPreview = document.getElementById('eraserPreview');
+  const eraserCircle = document.getElementById('eraserCircle');
+  const selectionBox = document.getElementById('selectionBox');
+
+  function saveState() {
+    history.push(ctx.getImageData(0, 0, width, height));
+    redoStack = [];
+  }
+
+  function startDraw(e) {
+    e.preventDefault();
+    drawing = true;
+    points = [];
+    const pos = getPos(e);
+    points.push(pos);
+    if (currentTool === 'selection') {
+      selectionStart = pos;
+      selectionBox.style.left = pos.x + 'px';
+      selectionBox.style.top = pos.y + 'px';
+      selectionBox.style.width = '0px';
+      selectionBox.style.height = '0px';
+      selectionBox.style.display = 'block';
+    }
+  }
+
+  function draw(e) {
+    if (!drawing) return;
+    const pos = getPos(e);
+
+    if (currentTool === 'pen') {
+      points.push(pos);
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+
+      ctx.beginPath();
+      ctx.moveTo(points[points.length - 2].x, points[points.length - 2].y);
+      ctx.lineTo(pos.x, pos.y);
+
+      ctx.strokeStyle = penColor;
+
+      if (penType === 'pencil') {
+        ctx.lineWidth = penSize;
+        ctx.globalAlpha = 0.5;
+      } else if (penType === 'highlighter') {
+        ctx.lineWidth = penSize * 3;
+        ctx.globalAlpha = 0.3;
+      } else {
+        ctx.lineWidth = penSize;
+        ctx.globalAlpha = 1;
+      }
+
+      ctx.stroke();
+      ctx.closePath();
+    }
+    else if (currentTool === 'eraser') {
+      ctx.clearRect(pos.x - eraserSize / 2, pos.y - eraserSize / 2, eraserSize, eraserSize);
+      eraserCircle.style.left = (pos.x - eraserSize / 2) + 'px';
+      eraserCircle.style.top = (pos.y - eraserSize / 2) + 'px';
+      eraserCircle.style.width = eraserSize + 'px';
+      eraserCircle.style.height = eraserSize + 'px';
+      eraserCircle.style.display = 'block';
+    }
+    else if (currentTool === 'selection') {
+      const x = Math.min(selectionStart.x, pos.x);
+      const y = Math.min(selectionStart.y, pos.y);
+      const w = Math.abs(selectionStart.x - pos.x);
+      const h = Math.abs(selectionStart.y - pos.y);
+      selectionBox.style.left = x + 'px';
+      selectionBox.style.top = y + 'px';
+      selectionBox.style.width = w + 'px';
+      selectionBox.style.height = h + 'px';
+    }
+  }
+
+  function endDraw(e) {
+    drawing = false;
+    if (currentTool === 'pen') saveState();
+    if (currentTool === 'eraser') {
+      saveState();
+      eraserCircle.style.display = 'none';
+    }
+    if (currentTool === 'selection') {
+      const box = selectionBox.getBoundingClientRect();
+      ctx.clearRect(box.left, box.top, box.width, box.height);
+      saveState();
+      selectionBox.style.display = 'none';
+      currentTool = 'pen';
+    }
+  }
+
+  function getPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const x = e.touches ? e.touches[0].clientX : e.clientX;
+    const y = e.touches ? e.touches[0].clientY : e.clientY;
+    return { x: x - rect.left, y: y - rect.top };
+  }
+
+  penBtn.onclick = () => {
+    penPanel.style.display = penPanel.style.display === 'flex' ? 'none' : 'flex';
+    eraserPanel.style.display = 'none';
+    currentTool = 'pen';
+  };
+
+  eraserBtn.onclick = () => {
+    eraserPanel.style.display = eraserPanel.style.display === 'flex' ? 'none' : 'flex';
+    penPanel.style.display = 'none';
+    currentTool = 'eraser';
+  };
+
+  undoBtn.onclick = () => {
+    if (history.length) {
+      redoStack.push(ctx.getImageData(0, 0, width, height));
+      const last = history.pop();
+      ctx.putImageData(last, 0, 0);
+    }
+  };
+
+  redoBtn.onclick = () => {
+    if (redoStack.length) {
+      history.push(ctx.getImageData(0, 0, width, height));
+      const next = redoStack.pop();
+      ctx.putImageData(next, 0, 0);
+    }
+  };
+
+  document.querySelectorAll('.color-circle').forEach(c => {
+    c.onclick = () => {
+      penColor = c.dataset.color;
+      penPreview.style.background = penColor;
+    };
+  });
+
+  penSizeSlider.oninput = () => {
+    penSize = parseInt(penSizeSlider.value);
+    penPreview.style.width = penSize + 'px';
+    penPreview.style.height = penSize + 'px';
+  };
+
+  eraserSizeSlider.oninput = () => {
+    eraserSize = parseInt(eraserSizeSlider.value);
+    eraserPreview.style.width = eraserSize + 'px';
+    eraserPreview.style.height = eraserSize + 'px';
+  };
+
+  document.querySelectorAll('.pen-type-selector button').forEach(btn => {
+    btn.onclick = () => penType = btn.dataset.pen;
+  });
+
+  document.getElementById('selectionEraserBtn').onclick = () => {
+    currentTool = 'selection';
+    eraserPanel.style.display = 'none';
+    penPanel.style.display = 'none';
+  };
+
+  canvas.addEventListener('mousedown', startDraw);
+  canvas.addEventListener('mousemove', draw);
+  canvas.addEventListener('mouseup', endDraw);
+  canvas.addEventListener('touchstart', startDraw);
+  canvas.addEventListener('touchmove', draw);
+  canvas.addEventListener('touchend', endDraw);
+
+  window.addEventListener('resize', () => {
+    width = canvas.width = window.innerWidth;
+    height = canvas.height = window.innerHeight;
+  });
+
+  saveState(); // initial state
+</script>
+</body>
+</html>
