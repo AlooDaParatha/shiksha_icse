@@ -3,100 +3,135 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Digital Whiteboard</title>
+  <title>Premium Digital Whiteboard</title>
   <style>
     html, body {
       margin: 0;
       padding: 0;
       overflow: hidden;
+      background: #fdfdfd;
       touch-action: none;
-      background: #fff;
+      font-family: 'Segoe UI', sans-serif;
     }
     canvas {
       position: absolute;
       top: 0; left: 0;
       z-index: 1;
     }
+    /* Toolbar */
     .toolbar {
       position: absolute;
       bottom: 0;
       width: 100%;
-      height: 60px;
-      background: #f0f0f0;
+      height: 50px;
+      background: #ffffffcc;
+      backdrop-filter: blur(8px);
       display: flex;
       justify-content: space-around;
       align-items: center;
       z-index: 5;
-      border-top: 1px solid #ccc;
+      border-top: 1px solid #ddd;
     }
     .tool-btn {
-      font-size: 24px;
+      font-size: 20px;
       background: none;
       border: none;
+      color: #444;
+      cursor: pointer;
+      transition: 0.2s;
     }
-
+    .tool-btn:hover {
+      color: #000;
+      transform: scale(1.1);
+    }
+    /* Panels */
     .panel {
       position: absolute;
-      bottom: 60px;
+      bottom: 55px;
       background: #fff;
       border-radius: 8px;
       padding: 10px;
-      box-shadow: 0 0 10px #0002;
+      box-shadow: 0 2px 10px #0002;
       z-index: 6;
       display: none;
       flex-direction: column;
       gap: 8px;
       align-items: center;
+      min-width: 200px;
     }
-
     .color-picker {
       display: flex;
-      gap: 5px;
+      gap: 6px;
     }
     .color-circle {
-      width: 24px;
-      height: 24px;
+      width: 20px;
+      height: 20px;
       border-radius: 50%;
       border: 1px solid #ccc;
       cursor: pointer;
     }
-
     .size-slider {
-      width: 100px;
+      width: 120px;
     }
-
     .size-preview {
       width: 20px;
       height: 20px;
       border-radius: 50%;
       background: black;
-      margin-top: 5px;
     }
-
     #eraserCircle {
       position: absolute;
       pointer-events: none;
       border-radius: 50%;
-      background: rgba(0,0,0,0.1);
-      border: 1px solid #888;
+      border: 1px solid #aaa;
+      background: rgba(0, 0, 0, 0.08);
       display: none;
       z-index: 2;
     }
-
     .pen-type-selector {
       display: flex;
-      gap: 5px;
+      gap: 4px;
     }
-
     .pen-type-selector button {
-      font-size: 12px;
+      font-size: 11px;
+      padding: 4px 6px;
     }
-
     .selection-box {
       position: absolute;
       border: 2px dashed red;
       display: none;
       z-index: 10;
+    }
+    /* Image upload panel */
+    #uploadPanel input {
+      width: 150px;
+      padding: 4px;
+      font-size: 12px;
+    }
+    #uploadPanel button {
+      font-size: 12px;
+      margin-top: 5px;
+    }
+    #imageResults {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 5px;
+      max-height: 150px;
+      overflow-y: auto;
+      width: 100%;
+      margin-top: 5px;
+    }
+    .image-result {
+      width: 60px;
+      height: 60px;
+      object-fit: cover;
+      border-radius: 4px;
+      cursor: pointer;
+      border: 1px solid #ddd;
+      transition: 0.2s;
+    }
+    .image-result:hover {
+      border: 1px solid #000;
     }
   </style>
 </head>
@@ -129,11 +164,20 @@
   <button id="selectionEraserBtn">Selection Eraser</button>
 </div>
 
+<!-- Upload Panel -->
+<div class="panel" id="uploadPanel">
+  <input type="text" id="searchQuery" placeholder="Search image">
+  <button id="searchImageBtn">Search</button>
+  <div id="imageResults"></div>
+</div>
+
 <div class="selection-box" id="selectionBox"></div>
 
+<!-- Toolbar -->
 <div class="toolbar">
   <button class="tool-btn" id="penBtn">✏️</button>
   <button class="tool-btn" id="eraserBtn">🧽</button>
+  <button class="tool-btn" id="uploadBtn">🖼️</button>
   <button class="tool-btn" id="undoBtn">↩️</button>
   <button class="tool-btn" id="redoBtn">↪️</button>
 </div>
@@ -153,11 +197,14 @@
   let points = [];
   let history = [];
   let redoStack = [];
+  let selectionStart = null;
 
   const penPanel = document.getElementById('penPanel');
   const eraserPanel = document.getElementById('eraserPanel');
+  const uploadPanel = document.getElementById('uploadPanel');
   const penBtn = document.getElementById('penBtn');
   const eraserBtn = document.getElementById('eraserBtn');
+  const uploadBtn = document.getElementById('uploadBtn');
   const undoBtn = document.getElementById('undoBtn');
   const redoBtn = document.getElementById('redoBtn');
   const penSizeSlider = document.getElementById('penSizeSlider');
@@ -166,6 +213,7 @@
   const eraserPreview = document.getElementById('eraserPreview');
   const eraserCircle = document.getElementById('eraserCircle');
   const selectionBox = document.getElementById('selectionBox');
+  const imageResults = document.getElementById('imageResults');
 
   function saveState() {
     history.push(ctx.getImageData(0, 0, width, height));
@@ -196,13 +244,10 @@
       points.push(pos);
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
-
       ctx.beginPath();
       ctx.moveTo(points[points.length - 2].x, points[points.length - 2].y);
       ctx.lineTo(pos.x, pos.y);
-
       ctx.strokeStyle = penColor;
-
       if (penType === 'pencil') {
         ctx.lineWidth = penSize;
         ctx.globalAlpha = 0.5;
@@ -213,10 +258,9 @@
         ctx.lineWidth = penSize;
         ctx.globalAlpha = 1;
       }
-
       ctx.stroke();
       ctx.closePath();
-    }
+    } 
     else if (currentTool === 'eraser') {
       ctx.clearRect(pos.x - eraserSize / 2, pos.y - eraserSize / 2, eraserSize, eraserSize);
       eraserCircle.style.left = (pos.x - eraserSize / 2) + 'px';
@@ -224,7 +268,7 @@
       eraserCircle.style.width = eraserSize + 'px';
       eraserCircle.style.height = eraserSize + 'px';
       eraserCircle.style.display = 'block';
-    }
+    } 
     else if (currentTool === 'selection') {
       const x = Math.min(selectionStart.x, pos.x);
       const y = Math.min(selectionStart.y, pos.y);
@@ -239,11 +283,8 @@
 
   function endDraw(e) {
     drawing = false;
-    if (currentTool === 'pen') saveState();
-    if (currentTool === 'eraser') {
-      saveState();
-      eraserCircle.style.display = 'none';
-    }
+    if (currentTool === 'pen' || currentTool === 'eraser') saveState();
+    if (currentTool === 'eraser') eraserCircle.style.display = 'none';
     if (currentTool === 'selection') {
       const box = selectionBox.getBoundingClientRect();
       ctx.clearRect(box.left, box.top, box.width, box.height);
@@ -260,17 +301,16 @@
     return { x: x - rect.left, y: y - rect.top };
   }
 
-  penBtn.onclick = () => {
-    penPanel.style.display = penPanel.style.display === 'flex' ? 'none' : 'flex';
-    eraserPanel.style.display = 'none';
-    currentTool = 'pen';
-  };
-
-  eraserBtn.onclick = () => {
-    eraserPanel.style.display = eraserPanel.style.display === 'flex' ? 'none' : 'flex';
+  function togglePanel(panel) {
     penPanel.style.display = 'none';
-    currentTool = 'eraser';
-  };
+    eraserPanel.style.display = 'none';
+    uploadPanel.style.display = 'none';
+    if (panel) panel.style.display = panel.style.display === 'flex' ? 'none' : 'flex';
+  }
+
+  penBtn.onclick = () => { togglePanel(penPanel); currentTool = 'pen'; };
+  eraserBtn.onclick = () => { togglePanel(eraserPanel); currentTool = 'eraser'; };
+  uploadBtn.onclick = () => { togglePanel(uploadPanel); };
 
   undoBtn.onclick = () => {
     if (history.length) {
@@ -313,8 +353,33 @@
 
   document.getElementById('selectionEraserBtn').onclick = () => {
     currentTool = 'selection';
-    eraserPanel.style.display = 'none';
-    penPanel.style.display = 'none';
+    togglePanel(null);
+  };
+
+  document.getElementById('searchImageBtn').onclick = async () => {
+    const query = document.getElementById('searchQuery').value.trim();
+    if (!query) return;
+
+    const accessKey = "vBK_68HVaDjMYfHLZ3hz9qCjtt2y_37tr1SDPG1uz6s";
+    const res = await fetch(`https://api.unsplash.com/search/photos?query=${query}&per_page=9&client_id=${accessKey}`);
+    const data = await res.json();
+    imageResults.innerHTML = "";
+
+    data.results.forEach(imgData => {
+      const img = document.createElement("img");
+      img.src = imgData.urls.thumb;
+      img.className = "image-result";
+      img.onclick = () => {
+        const image = new Image();
+        image.crossOrigin = "anonymous";
+        image.onload = () => {
+          ctx.drawImage(image, 50, 50, image.width / 2, image.height / 2);
+          saveState();
+        };
+        image.src = imgData.urls.small;
+      };
+      imageResults.appendChild(img);
+    });
   };
 
   canvas.addEventListener('mousedown', startDraw);
@@ -329,7 +394,7 @@
     height = canvas.height = window.innerHeight;
   });
 
-  saveState(); // initial state
+  saveState();
 </script>
 </body>
 </html>
