@@ -1,0 +1,6 @@
+john:
+  password: "12345"
+admincms:
+  password: "admin123"
+ansh:
+  password: "cmsboard"
